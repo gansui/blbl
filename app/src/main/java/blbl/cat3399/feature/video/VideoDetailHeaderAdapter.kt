@@ -7,28 +7,50 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import blbl.cat3399.core.image.ImageLoader
 import blbl.cat3399.core.image.ImageUrl
+import blbl.cat3399.core.model.VideoCard
 import blbl.cat3399.core.ui.cloneInUserScale
 import blbl.cat3399.databinding.ItemVideoDetailHeaderBinding
-import blbl.cat3399.feature.player.PlayerPlaylistItem
 import java.lang.ref.WeakReference
 
 class VideoDetailHeaderAdapter(
     private val onPlayClick: () -> Unit,
     private val onUpClick: () -> Unit,
-    private val onPartClick: (item: PlayerPlaylistItem, index: Int) -> Unit,
-    private val onSeasonClick: (item: PlayerPlaylistItem, index: Int) -> Unit,
+    private val onTabClick: (tabName: String) -> Unit,
+    private val onLikeClick: () -> Unit,
+    private val onCoinClick: () -> Unit,
+    private val onFavClick: () -> Unit,
+    private val onSecondaryClick: () -> Unit,
+    private val onPartsOrderClick: () -> Unit,
+    private val onSeasonOrderClick: () -> Unit,
+    private val onPartCardClick: (card: VideoCard, index: Int) -> Unit,
+    private val onSeasonCardClick: (card: VideoCard, index: Int) -> Unit,
 ) : RecyclerView.Adapter<VideoDetailHeaderAdapter.Vh>() {
     private var holderRef: WeakReference<Vh>? = null
 
     private var title: String? = null
+    private var metaText: String? = null
     private var desc: String? = null
     private var coverUrl: String? = null
+    private var usePosterCover: Boolean = false
     private var upName: String? = null
     private var upAvatar: String? = null
-    private var seasonTitle: String? = null
-    private var parts: List<PlayerPlaylistItem> = emptyList()
-    private var seasonItems: List<PlayerPlaylistItem> = emptyList()
-    private var seasonIndex: Int? = null
+    private var tabName: String? = null
+
+    private var primaryButtonText: String? = null
+    private var secondaryButtonText: String? = null
+    private var showActions: Boolean = true
+
+    private var partsHeaderText: String? = null
+    private var partsCards: List<VideoCard> = emptyList()
+    private var partsSelectedKey: String? = null
+    private var partsOrderReversed: Boolean = false
+
+    private var seasonHeaderText: String? = null
+    private var seasonCards: List<VideoCard> = emptyList()
+    private var seasonSelectedKey: String? = null
+    private var seasonOrderReversed: Boolean = false
+
+    private var recommendHeaderText: String? = null
 
     init {
         setHasStableIds(true)
@@ -46,24 +68,50 @@ class VideoDetailHeaderAdapter(
 
     fun update(
         title: String?,
+        metaText: String?,
         desc: String?,
         coverUrl: String?,
+        usePosterCover: Boolean,
         upName: String?,
         upAvatar: String?,
-        seasonTitle: String?,
-        parts: List<PlayerPlaylistItem>,
-        seasonItems: List<PlayerPlaylistItem>,
-        seasonIndex: Int?,
+        tabName: String?,
+        primaryButtonText: String?,
+        secondaryButtonText: String?,
+        showActions: Boolean,
+        partsHeaderText: String?,
+        partsCards: List<VideoCard>,
+        partsSelectedKey: String?,
+        partsOrderReversed: Boolean,
+        seasonHeaderText: String?,
+        seasonCards: List<VideoCard>,
+        seasonSelectedKey: String?,
+        seasonOrderReversed: Boolean,
+        recommendHeaderText: String?,
     ) {
         this.title = title
+        this.metaText = metaText
         this.desc = desc
         this.coverUrl = coverUrl
+        this.usePosterCover = usePosterCover
         this.upName = upName
         this.upAvatar = upAvatar
-        this.seasonTitle = seasonTitle
-        this.parts = parts
-        this.seasonItems = seasonItems
-        this.seasonIndex = seasonIndex
+        this.tabName = tabName
+
+        this.primaryButtonText = primaryButtonText
+        this.secondaryButtonText = secondaryButtonText
+        this.showActions = showActions
+
+        this.partsHeaderText = partsHeaderText
+        this.partsCards = partsCards
+        this.partsSelectedKey = partsSelectedKey
+        this.partsOrderReversed = partsOrderReversed
+
+        this.seasonHeaderText = seasonHeaderText
+        this.seasonCards = seasonCards
+        this.seasonSelectedKey = seasonSelectedKey
+        this.seasonOrderReversed = seasonOrderReversed
+
+        this.recommendHeaderText = recommendHeaderText
         notifyItemChanged(0)
     }
 
@@ -74,20 +122,44 @@ class VideoDetailHeaderAdapter(
                 parent,
                 false,
             )
-        return Vh(binding, onPlayClick, onUpClick, onPartClick, onSeasonClick)
+        return Vh(
+            binding = binding,
+            onPlayClick = onPlayClick,
+            onUpClick = onUpClick,
+            onTabClick = onTabClick,
+            onLikeClick = onLikeClick,
+            onCoinClick = onCoinClick,
+            onFavClick = onFavClick,
+            onSecondaryClick = onSecondaryClick,
+            onPartsOrderClick = onPartsOrderClick,
+            onSeasonOrderClick = onSeasonOrderClick,
+            onPartCardClick = onPartCardClick,
+            onSeasonCardClick = onSeasonCardClick,
+        )
     }
 
     override fun onBindViewHolder(holder: Vh, position: Int) {
         holder.bind(
             title = title,
+            metaText = metaText,
             desc = desc,
             coverUrl = coverUrl,
+            usePosterCover = usePosterCover,
             upName = upName,
             upAvatar = upAvatar,
-            seasonTitle = seasonTitle,
-            parts = parts,
-            seasonItems = seasonItems,
-            seasonIndex = seasonIndex,
+            tabName = tabName,
+            primaryButtonText = primaryButtonText,
+            secondaryButtonText = secondaryButtonText,
+            showActions = showActions,
+            partsHeaderText = partsHeaderText,
+            partsCards = partsCards,
+            partsSelectedKey = partsSelectedKey,
+            partsOrderReversed = partsOrderReversed,
+            seasonHeaderText = seasonHeaderText,
+            seasonCards = seasonCards,
+            seasonSelectedKey = seasonSelectedKey,
+            seasonOrderReversed = seasonOrderReversed,
+            recommendHeaderText = recommendHeaderText,
         )
     }
 
@@ -106,42 +178,113 @@ class VideoDetailHeaderAdapter(
         val binding: ItemVideoDetailHeaderBinding,
         private val onPlayClick: () -> Unit,
         private val onUpClick: () -> Unit,
-        private val onPartClick: (item: PlayerPlaylistItem, index: Int) -> Unit,
-        private val onSeasonClick: (item: PlayerPlaylistItem, index: Int) -> Unit,
+        private val onTabClick: (tabName: String) -> Unit,
+        private val onLikeClick: () -> Unit,
+        private val onCoinClick: () -> Unit,
+        private val onFavClick: () -> Unit,
+        private val onSecondaryClick: () -> Unit,
+        private val onPartsOrderClick: () -> Unit,
+        private val onSeasonOrderClick: () -> Unit,
+        private val onPartCardClick: (card: VideoCard, index: Int) -> Unit,
+        private val onSeasonCardClick: (card: VideoCard, index: Int) -> Unit,
     ) : RecyclerView.ViewHolder(binding.root) {
-        private val partsAdapter = VideoDetailPlaylistAdapter { item, index -> onPartClick(item, index) }
-        private val seasonAdapter = VideoDetailPlaylistAdapter { item, index -> onSeasonClick(item, index) }
+        private var partsSelectedKey: String? = null
+        private var seasonSelectedKey: String? = null
+
+        private val partsAdapter =
+            VideoCardAdapter(
+                onClick = { card, index -> onPartCardClick(card, index) },
+                onLongClick = null,
+                fixedItemWidthDimenRes = blbl.cat3399.R.dimen.video_detail_section_card_width,
+                fixedItemMarginDimenRes = null,
+                stableIdKey = ::cardStableKey,
+                isSelected = { card, _ -> cardStableKey(card) == partsSelectedKey },
+            )
+
+        private val seasonAdapter =
+            VideoCardAdapter(
+                onClick = { card, index -> onSeasonCardClick(card, index) },
+                onLongClick = null,
+                fixedItemWidthDimenRes = blbl.cat3399.R.dimen.video_detail_section_card_width,
+                fixedItemMarginDimenRes = null,
+                stableIdKey = ::cardStableKey,
+                isSelected = { card, _ -> cardStableKey(card) == seasonSelectedKey },
+            )
+
+        private var lastPartsAutoScrollKey: String? = null
         private var lastSeasonAutoScrollKey: String? = null
 
         init {
             binding.btnPlay.setOnClickListener { onPlayClick() }
             binding.cardUp.setOnClickListener { onUpClick() }
+            binding.cardTab.setOnClickListener {
+                val tab = (binding.cardTab.tag as? String)?.trim().orEmpty()
+                if (tab.isNotBlank()) onTabClick(tab)
+            }
+
+            binding.btnLike.setOnClickListener { onLikeClick() }
+            binding.btnCoin.setOnClickListener { onCoinClick() }
+            binding.btnFav.setOnClickListener { onFavClick() }
+            binding.btnSecondary.setOnClickListener { onSecondaryClick() }
+
+            binding.btnPartsOrder.setOnClickListener { onPartsOrderClick() }
+            binding.btnSeasonOrder.setOnClickListener { onSeasonOrderClick() }
 
             binding.recyclerParts.layoutManager =
                 LinearLayoutManager(binding.root.context, LinearLayoutManager.HORIZONTAL, false)
+            binding.recyclerParts.itemAnimator = null
             binding.recyclerParts.adapter = partsAdapter
 
             binding.recyclerSeason.layoutManager =
                 LinearLayoutManager(binding.root.context, LinearLayoutManager.HORIZONTAL, false)
+            binding.recyclerSeason.itemAnimator = null
             binding.recyclerSeason.adapter = seasonAdapter
         }
 
         fun bind(
             title: String?,
+            metaText: String?,
             desc: String?,
             coverUrl: String?,
+            usePosterCover: Boolean,
             upName: String?,
             upAvatar: String?,
-            seasonTitle: String?,
-            parts: List<PlayerPlaylistItem>,
-            seasonItems: List<PlayerPlaylistItem>,
-            seasonIndex: Int?,
+            tabName: String?,
+            primaryButtonText: String?,
+            secondaryButtonText: String?,
+            showActions: Boolean,
+            partsHeaderText: String?,
+            partsCards: List<VideoCard>,
+            partsSelectedKey: String?,
+            partsOrderReversed: Boolean,
+            seasonHeaderText: String?,
+            seasonCards: List<VideoCard>,
+            seasonSelectedKey: String?,
+            seasonOrderReversed: Boolean,
+            recommendHeaderText: String?,
         ) {
             binding.tvTitle.text = title?.trim().takeIf { !it.isNullOrBlank() } ?: "-"
 
+            val safeMeta = metaText?.trim().takeIf { !it.isNullOrBlank() }
+            binding.tvMeta.isVisible = safeMeta != null
+            binding.tvMeta.text = safeMeta.orEmpty()
+
             val safeCover = coverUrl?.trim().takeIf { !it.isNullOrBlank() }
+            binding.ivCoverPoster.isVisible = usePosterCover
             if (safeCover != null) {
-                ImageLoader.loadInto(binding.ivCover, ImageUrl.cover(safeCover))
+                if (usePosterCover) {
+                    binding.ivCover.alpha = 0.3f
+                    binding.ivCover.isVisible = true
+                    ImageLoader.loadInto(binding.ivCover, ImageUrl.poster(safeCover))
+                    ImageLoader.loadInto(binding.ivCoverPoster, ImageUrl.poster(safeCover))
+                } else {
+                    binding.ivCover.alpha = 1f
+                    binding.ivCover.isVisible = true
+                    ImageLoader.loadInto(binding.ivCover, ImageUrl.cover(safeCover))
+                }
+            } else {
+                binding.ivCover.alpha = 1f
+                binding.ivCover.isVisible = true
             }
 
             val safeUpName = upName?.trim().takeIf { !it.isNullOrBlank() }
@@ -154,38 +297,111 @@ class VideoDetailHeaderAdapter(
             val safeDesc = desc?.trim().takeIf { !it.isNullOrBlank() }
             binding.tvDesc.text = safeDesc ?: "暂无简介"
 
-            val showParts = parts.size > 1
+            val safeTab = tabName?.trim().takeIf { !it.isNullOrBlank() }
+            binding.cardTab.isVisible = safeTab != null
+            binding.cardTab.tag = safeTab
+            binding.tvTab.text = safeTab?.let { "分区：$it" }.orEmpty()
+
+            binding.btnPlay.text = primaryButtonText?.trim().takeIf { !it.isNullOrBlank() } ?: "播放"
+
+            val safeSecondary = secondaryButtonText?.trim().takeIf { !it.isNullOrBlank() }
+            binding.btnSecondary.isVisible = safeSecondary != null
+            binding.btnSecondary.text = safeSecondary.orEmpty()
+
+            binding.btnLike.isVisible = showActions
+            binding.btnCoin.isVisible = showActions
+            binding.btnFav.isVisible = showActions
+
+            val safePartsHeader = partsHeaderText?.trim()?.takeIf { it.isNotBlank() }
+            val showParts = safePartsHeader != null && partsCards.isNotEmpty()
             binding.tvPartsHeader.isVisible = showParts
+            binding.btnPartsOrder.isVisible = showParts && partsCards.size > 1
             binding.recyclerParts.isVisible = showParts
             if (showParts) {
-                binding.tvPartsHeader.text = "分P（${parts.size}）"
-                partsAdapter.submit(parts)
+                binding.tvPartsHeader.text = safePartsHeader
+                binding.tvPartsOrder.text =
+                    if (partsCards.size > 1) {
+                        binding.root.context.getString(
+                            if (partsOrderReversed) {
+                                blbl.cat3399.R.string.my_episode_order_desc
+                            } else {
+                                blbl.cat3399.R.string.my_episode_order_asc
+                            },
+                        )
+                    } else {
+                        ""
+                    }
+                this.partsSelectedKey = partsSelectedKey
+                partsAdapter.submit(partsCards)
+                maybeAutoScrollParts(partsCards, partsSelectedKey)
             } else {
+                binding.tvPartsOrder.text = ""
+                this.partsSelectedKey = null
                 partsAdapter.submit(emptyList())
+                lastPartsAutoScrollKey = null
             }
 
-            val showSeason = seasonItems.size > 1
+            val safeSeasonHeader = seasonHeaderText?.trim()?.takeIf { it.isNotBlank() }
+            val showSeason = safeSeasonHeader != null && seasonCards.isNotEmpty()
             binding.tvSeasonHeader.isVisible = showSeason
+            binding.btnSeasonOrder.isVisible = showSeason && seasonCards.size > 1
             binding.recyclerSeason.isVisible = showSeason
             if (showSeason) {
-                val safeTitle = seasonTitle?.trim().takeIf { !it.isNullOrBlank() }
-                binding.tvSeasonHeader.text = safeTitle?.let { "合集：$it" } ?: "合集（${seasonItems.size}）"
-                seasonAdapter.submit(seasonItems)
-                maybeAutoScrollSeason(seasonItems, seasonIndex)
+                binding.tvSeasonHeader.text = safeSeasonHeader
+                binding.tvSeasonOrder.text =
+                    if (seasonCards.size > 1) {
+                        binding.root.context.getString(
+                            if (seasonOrderReversed) {
+                                blbl.cat3399.R.string.my_episode_order_desc
+                            } else {
+                                blbl.cat3399.R.string.my_episode_order_asc
+                            },
+                        )
+                    } else {
+                        ""
+                    }
+                this.seasonSelectedKey = seasonSelectedKey
+                seasonAdapter.submit(seasonCards)
+                maybeAutoScrollSeason(seasonCards, seasonSelectedKey)
             } else {
+                binding.tvSeasonOrder.text = ""
+                this.seasonSelectedKey = null
                 seasonAdapter.submit(emptyList())
                 lastSeasonAutoScrollKey = null
             }
+
+            val safeRecommend = recommendHeaderText?.trim()?.takeIf { it.isNotBlank() }
+            binding.tvRecommendHeader.isVisible = safeRecommend != null
+            binding.tvRecommendHeader.text = safeRecommend.orEmpty()
+
+            // Nested horizontal lists can change their measured height after adapter updates;
+            // ensure the header item gets re-measured to avoid overlap with following items.
+            binding.root.requestLayout()
         }
 
-        private fun maybeAutoScrollSeason(seasonItems: List<PlayerPlaylistItem>, seasonIndex: Int?) {
-            val idx = seasonIndex?.takeIf { it in seasonItems.indices } ?: return
-            val targetBvid = seasonItems[idx].bvid.trim()
-            if (targetBvid.isBlank()) return
+        private fun maybeAutoScrollParts(partsCards: List<VideoCard>, selectedKey: String?) {
+            val safeSelected = selectedKey?.trim()?.takeIf { it.isNotBlank() } ?: return
+            val idx = partsCards.indexOfFirst { cardStableKey(it) == safeSelected }.takeIf { it >= 0 } ?: return
 
-            val firstBvid = seasonItems.firstOrNull()?.bvid?.trim().orEmpty()
-            val lastBvid = seasonItems.lastOrNull()?.bvid?.trim().orEmpty()
-            val autoScrollKey = "$targetBvid|$idx|${seasonItems.size}|$firstBvid|$lastBvid"
+            val firstKey = partsCards.firstOrNull()?.let(::cardStableKey).orEmpty()
+            val lastKey = partsCards.lastOrNull()?.let(::cardStableKey).orEmpty()
+            val autoScrollKey = "$safeSelected|$idx|${partsCards.size}|$firstKey|$lastKey"
+            if (autoScrollKey == lastPartsAutoScrollKey) return
+            lastPartsAutoScrollKey = autoScrollKey
+
+            binding.recyclerParts.post {
+                val lm = binding.recyclerParts.layoutManager as? LinearLayoutManager ?: return@post
+                lm.scrollToPositionWithOffset(idx, binding.recyclerParts.paddingLeft)
+            }
+        }
+
+        private fun maybeAutoScrollSeason(seasonCards: List<VideoCard>, selectedKey: String?) {
+            val safeSelected = selectedKey?.trim()?.takeIf { it.isNotBlank() } ?: return
+            val idx = seasonCards.indexOfFirst { cardStableKey(it) == safeSelected }.takeIf { it >= 0 } ?: return
+
+            val firstKey = seasonCards.firstOrNull()?.let(::cardStableKey).orEmpty()
+            val lastKey = seasonCards.lastOrNull()?.let(::cardStableKey).orEmpty()
+            val autoScrollKey = "$safeSelected|$idx|${seasonCards.size}|$firstKey|$lastKey"
             if (autoScrollKey == lastSeasonAutoScrollKey) return
             lastSeasonAutoScrollKey = autoScrollKey
 
@@ -194,5 +410,18 @@ class VideoDetailHeaderAdapter(
                 lm.scrollToPositionWithOffset(idx, binding.recyclerSeason.paddingLeft)
             }
         }
+
+        private fun cardStableKey(card: VideoCard): String =
+            buildString {
+                append(card.bvid)
+                append('|')
+                append(card.cid ?: -1L)
+                append('|')
+                append(card.aid ?: -1L)
+                append('|')
+                append(card.epId ?: -1L)
+                append('|')
+                append(card.title)
+            }
     }
 }

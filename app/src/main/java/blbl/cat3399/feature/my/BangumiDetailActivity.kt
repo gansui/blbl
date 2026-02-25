@@ -1,70 +1,435 @@
 package blbl.cat3399.feature.my
 
+import android.content.Intent
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.ProgressBar
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.SimpleItemAnimator
+import blbl.cat3399.R
+import blbl.cat3399.core.api.BiliApi
+import blbl.cat3399.core.log.AppLog
+import blbl.cat3399.core.model.BangumiEpisode
+import blbl.cat3399.core.model.BangumiSeasonDetail
+import blbl.cat3399.core.model.VideoCard
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.ui.AppToast
 import blbl.cat3399.core.ui.BaseActivity
 import blbl.cat3399.core.ui.Immersive
+import blbl.cat3399.core.ui.ThemeColor
+import blbl.cat3399.core.ui.cloneInUserScale
+import blbl.cat3399.core.util.Format
+import blbl.cat3399.databinding.ActivityVideoDetailBinding
+import blbl.cat3399.feature.player.PlayerActivity
+import blbl.cat3399.feature.player.PlayerPlaylistItem
+import blbl.cat3399.feature.player.PlayerPlaylistStore
+import blbl.cat3399.feature.video.VideoDetailHeaderAdapter
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private val EP_INDEX_ONLY_REGEX = Regex("^\\d+(?:\\.\\d+)?$")
+private val EP_NUMBER_REGEX = Regex("\\d+(?:\\.\\d+)?")
 
 class BangumiDetailActivity : BaseActivity() {
+    private lateinit var binding: ActivityVideoDetailBinding
+    private lateinit var headerAdapter: VideoDetailHeaderAdapter
+
+    private var loadJob: Job? = null
+    private var requestToken: Int = 0
+
+    private var resolvedSeasonId: Long? = null
+
+    private val seasonIdArg: Long? by lazy { intent.getLongExtra(EXTRA_SEASON_ID, -1L).takeIf { it > 0L } }
+    private val epIdArg: Long? by lazy { intent.getLongExtra(EXTRA_EP_ID, -1L).takeIf { it > 0L } }
+    private val isDramaArg: Boolean by lazy { intent.getBooleanExtra(EXTRA_IS_DRAMA, false) }
+    private val continueEpIdArg: Long? by lazy { intent.getLongExtra(EXTRA_CONTINUE_EP_ID, -1L).takeIf { it > 0L } ?: epIdArg }
+    private val continueEpIndexArg: Int? by lazy { intent.getIntExtra(EXTRA_CONTINUE_EP_INDEX, -1).takeIf { it > 0 } }
+
+    private var title: String? = null
+    private var metaText: String? = null
+    private var desc: String? = null
+    private var coverUrl: String? = null
+
+    private var episodeOrderReversed: Boolean = false
+    private var extrasOrderReversed: Boolean = false
+
+    private var mainEpisodes: List<BangumiEpisode> = emptyList()
+    private var extraEpisodes: List<BangumiEpisode> = emptyList()
+    private var continueEpisode: BangumiEpisode? = null
+
+    private var mainEpisodeCards: List<VideoCard> = emptyList()
+    private var extrasCards: List<VideoCard> = emptyList()
+    private var mainSelectedKey: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val container =
-            FrameLayout(this).apply {
-                id = View.generateViewId()
-            }
-        setContentView(container)
-        Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
-
-        val seasonId = intent.getLongExtra(EXTRA_SEASON_ID, -1L).takeIf { it > 0L }
-        val epId = intent.getLongExtra(EXTRA_EP_ID, -1L).takeIf { it > 0L }
-        val isDrama = intent.getBooleanExtra(EXTRA_IS_DRAMA, false)
-        val continueEpId = intent.getLongExtra(EXTRA_CONTINUE_EP_ID, -1L).takeIf { it > 0L } ?: epId
-        val continueEpIndex = intent.getIntExtra(EXTRA_CONTINUE_EP_INDEX, -1).takeIf { it > 0 }
-
-        if (seasonId == null && epId == null) {
+        if (seasonIdArg == null && epIdArg == null) {
             AppToast.show(this, "缺少 seasonId/epId")
             finish()
             return
         }
 
-        if (savedInstanceState == null) {
-            val fragment =
-                when {
-                    seasonId != null ->
-                        MyBangumiDetailFragment.newInstance(
-                            seasonId = seasonId,
-                            isDrama = isDrama,
-                            continueEpId = continueEpId,
-                            continueEpIndex = continueEpIndex,
-                        )
-                    else ->
-                        MyBangumiDetailFragment.newInstanceByEpId(
-                            epId = epId ?: 0L,
-                            isDrama = isDrama,
-                            continueEpId = continueEpId,
-                            continueEpIndex = continueEpIndex,
-                        )
-                }
-            supportFragmentManager.beginTransaction()
-                .setReorderingAllowed(true)
-                .replace(container.id, fragment)
-                .commit()
-        }
+        episodeOrderReversed = BiliClient.prefs.pgcEpisodeOrderReversed
+
+        showLoadingUi()
+        Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
+
+        initUi()
+        load()
     }
 
     override fun onResume() {
         super.onResume()
         Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
+        if (this::headerAdapter.isInitialized) headerAdapter.invalidateSizing()
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         finish()
     }
+
+    private fun showLoadingUi() {
+        val root =
+            FrameLayout(this).apply {
+                setBackgroundColor(
+                    ThemeColor.resolve(
+                        context = this@BangumiDetailActivity,
+                        attr = android.R.attr.colorBackground,
+                        fallbackRes = R.color.blbl_bg,
+                    ),
+                )
+                addView(
+                    ProgressBar(this@BangumiDetailActivity),
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply {
+                        gravity = Gravity.CENTER
+                    },
+                )
+            }
+        setContentView(root)
+    }
+
+    private fun initUi() {
+        binding = ActivityVideoDetailBinding.inflate(layoutInflater.cloneInUserScale(this))
+        setContentView(binding.root)
+        Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
+
+        binding.btnBack.setOnClickListener { finish() }
+
+        headerAdapter =
+            VideoDetailHeaderAdapter(
+                onPlayClick = { playContinue() },
+                onUpClick = { /* no-op */ },
+                onTabClick = { /* no-op */ },
+                onLikeClick = { /* no-op */ },
+                onCoinClick = { /* no-op */ },
+                onFavClick = { /* no-op */ },
+                onSecondaryClick = { AppToast.show(this, "暂不支持操作") },
+                onPartsOrderClick = {
+                    episodeOrderReversed = !episodeOrderReversed
+                    BiliClient.prefs.pgcEpisodeOrderReversed = episodeOrderReversed
+                    applyHeader()
+                    binding.recycler.post { headerAdapter.requestFocusPlay() }
+                },
+                onSeasonOrderClick = {
+                    extrasOrderReversed = !extrasOrderReversed
+                    applyHeader()
+                    binding.recycler.post { headerAdapter.requestFocusPlay() }
+                },
+                onPartCardClick = { card, _ -> playEpisodeCard(card, listKind = "main") },
+                onSeasonCardClick = { card, _ -> playEpisodeCard(card, listKind = "extra") },
+            )
+
+        binding.recycler.layoutManager = LinearLayoutManager(this)
+        (binding.recycler.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
+        binding.recycler.adapter = headerAdapter
+
+        binding.swipeRefresh.setOnRefreshListener { load() }
+
+        applyHeader()
+        binding.recycler.post { headerAdapter.requestFocusPlay() }
+    }
+
+    private fun load() {
+        val token = ++requestToken
+        loadJob?.cancel()
+        loadJob = null
+
+        binding.swipeRefresh.isRefreshing = true
+
+        loadJob =
+            lifecycleScope.launch {
+                try {
+                    val seasonId = seasonIdArg
+                    val epId = epIdArg
+                    if (seasonId == null && epId == null) error("缺少 seasonId/epId")
+                    val detail =
+                        withContext(Dispatchers.IO) {
+                            if (seasonId != null) {
+                                BiliApi.bangumiSeasonDetail(seasonId = seasonId)
+                            } else {
+                                BiliApi.bangumiSeasonDetailByEpId(epId = epId ?: 0L)
+                            }
+                        }
+                    if (token != requestToken) return@launch
+
+                    resolvedSeasonId = detail.seasonId.takeIf { it > 0L } ?: seasonId
+                    applyDetail(detail)
+                    applyHeader()
+                } catch (t: Throwable) {
+                    if (t is CancellationException) return@launch
+                    AppLog.e("BangumiDetail", "load failed seasonId=${seasonIdArg ?: -1L} epId=${epIdArg ?: -1L}", t)
+                    AppToast.show(this@BangumiDetailActivity, t.message ?: "加载失败")
+                } finally {
+                    if (token == requestToken) binding.swipeRefresh.isRefreshing = false
+                }
+            }
+    }
+
+    private fun applyDetail(detail: BangumiSeasonDetail) {
+        title = detail.title
+        desc = detail.evaluate.orEmpty()
+        coverUrl = detail.coverUrl
+
+        metaText =
+            buildList {
+                detail.subtitle?.takeIf { it.isNotBlank() }?.let { add(it) }
+                detail.ratingScore?.let { add(String.format("%.1f分", it)) }
+                detail.views?.let { add("${Format.count(it)}次观看") }
+                detail.danmaku?.let { add("${Format.count(it)}条弹幕") }
+            }.joinToString(" | ")
+                .trim()
+                .takeIf { it.isNotBlank() }
+
+        mainEpisodes = normalizeEpisodeOrder(detail.episodes)
+        extraEpisodes = detail.extraSections.flatMap { it.episodes }
+
+        continueEpisode =
+            (continueEpIdArg ?: detail.progressLastEpId)?.let { id ->
+                mainEpisodes.firstOrNull { it.epId == id }
+            } ?: continueEpIndexArg?.let { idx ->
+                mainEpisodes.firstOrNull { it.title.trim() == idx.toString() }
+            }
+
+        mainEpisodeCards =
+            mainEpisodes.mapIndexedNotNull { index, ep ->
+                val bvid = ep.bvid?.trim().orEmpty()
+                val cid = ep.cid
+                if (bvid.isBlank() || cid == null || cid <= 0L) return@mapIndexedNotNull null
+                bangumiEpToVideoCard(ep = ep, defaultIndex = index, sectionTitle = null)
+            }
+
+        extrasCards =
+            detail.extraSections.flatMap { section ->
+                val sectionTitle = section.title.trim().takeIf { it.isNotBlank() }
+                section.episodes.mapIndexedNotNull { index, ep ->
+                    val bvid = ep.bvid?.trim().orEmpty()
+                    val cid = ep.cid
+                    if (bvid.isBlank() || cid == null || cid <= 0L) return@mapIndexedNotNull null
+                    bangumiEpToVideoCard(ep = ep, defaultIndex = index, sectionTitle = sectionTitle)
+                }
+            }
+
+        mainSelectedKey =
+            continueEpisode?.let { target ->
+                mainEpisodeCards.firstOrNull { it.epId == target.epId }?.let(::cardStableKey)
+            }
+    }
+
+    private fun applyHeader() {
+        if (!this::headerAdapter.isInitialized) return
+        val displayEpisodeCards = if (episodeOrderReversed) mainEpisodeCards.asReversed() else mainEpisodeCards
+        val displayExtrasCards = if (extrasOrderReversed) extrasCards.asReversed() else extrasCards
+
+        val episodesHeader =
+            mainEpisodeCards.size.takeIf { it > 0 }?.let { n ->
+                "${getString(R.string.my_episode_section)}（$n）"
+            }
+        val extrasHeader =
+            extrasCards.size.takeIf { it > 0 }?.let { n ->
+                "花絮/预告（$n）"
+            }
+
+        headerAdapter.update(
+            title = title,
+            metaText = metaText,
+            desc = desc,
+            coverUrl = coverUrl,
+            usePosterCover = true,
+            upName = null,
+            upAvatar = null,
+            tabName = null,
+            primaryButtonText = getString(R.string.my_btn_continue),
+            secondaryButtonText = if (isDramaArg) "已追剧" else "已追番",
+            showActions = false,
+            partsHeaderText = episodesHeader,
+            partsCards = displayEpisodeCards,
+            partsSelectedKey = mainSelectedKey,
+            partsOrderReversed = episodeOrderReversed,
+            seasonHeaderText = extrasHeader,
+            seasonCards = displayExtrasCards,
+            seasonSelectedKey = null,
+            seasonOrderReversed = extrasOrderReversed,
+            recommendHeaderText = null,
+        )
+    }
+
+    private fun playContinue() {
+        val picked = continueEpisode
+        if (picked != null) {
+            val card = mainEpisodeCards.firstOrNull { it.epId == picked.epId }
+            if (card != null) {
+                playEpisodeCard(card, listKind = "main")
+                return
+            }
+        }
+        val first = mainEpisodeCards.firstOrNull()
+        if (first == null) {
+            AppToast.show(this, "暂无可播放剧集")
+            return
+        }
+        playEpisodeCard(first, listKind = "main")
+    }
+
+    private fun playEpisodeCard(card: VideoCard, listKind: String) {
+        val seasonId = resolvedSeasonId ?: seasonIdArg
+        if (seasonId == null || seasonId <= 0L) {
+            AppToast.show(this, "缺少 seasonId")
+            return
+        }
+        val bvid = card.bvid.trim()
+        val cid = card.cid ?: -1L
+        if (bvid.isBlank() || cid <= 0L) {
+            AppToast.show(this, "缺少播放信息（bvid/cid）")
+            return
+        }
+
+        val cards =
+            when (listKind) {
+                "extra" -> extrasCards
+                else -> mainEpisodeCards
+            }
+        val idx = cards.indexOfFirst { it.epId == card.epId }.takeIf { it >= 0 } ?: 0
+        val playlistItems =
+            cards.map {
+                PlayerPlaylistItem(
+                    bvid = it.bvid,
+                    cid = it.cid,
+                    epId = it.epId,
+                    aid = it.aid,
+                    title = it.title,
+                )
+            }
+        val token =
+            PlayerPlaylistStore.put(
+                items = playlistItems,
+                index = idx,
+                source = "Bangumi:$seasonId:$listKind",
+                uiCards = cards,
+            )
+        startActivity(
+            Intent(this, PlayerActivity::class.java)
+                .putExtra(PlayerActivity.EXTRA_BVID, bvid)
+                .putExtra(PlayerActivity.EXTRA_CID, cid)
+                .apply { card.epId?.let { putExtra(PlayerActivity.EXTRA_EP_ID, it) } }
+                .apply { card.aid?.let { putExtra(PlayerActivity.EXTRA_AID, it) } }
+                .putExtra(PlayerActivity.EXTRA_PLAYLIST_TOKEN, token)
+                .putExtra(PlayerActivity.EXTRA_PLAYLIST_INDEX, idx),
+        )
+    }
+
+    private fun bangumiEpToVideoCard(ep: BangumiEpisode, defaultIndex: Int, sectionTitle: String?): VideoCard {
+        val rawTitle = ep.title.trim().takeIf { it.isNotBlank() } ?: "-"
+        val title =
+            if (EP_INDEX_ONLY_REGEX.matches(rawTitle)) {
+                "第${rawTitle}话"
+            } else {
+                rawTitle
+            }
+        val longTitle = ep.longTitle.trim().takeIf { it.isNotBlank() }
+        val subtitle =
+            when {
+                sectionTitle != null && longTitle != null -> "$sectionTitle · $longTitle"
+                sectionTitle != null -> sectionTitle
+                else -> longTitle
+            }
+
+        return VideoCard(
+            bvid = ep.bvid.orEmpty(),
+            cid = ep.cid,
+            aid = ep.aid,
+            epId = ep.epId,
+            title = title.takeIf { it.isNotBlank() } ?: "第${defaultIndex + 1}集",
+            coverUrl = ep.coverUrl.orEmpty(),
+            durationSec = 0,
+            ownerName = "",
+            ownerFace = null,
+            ownerMid = null,
+            view = null,
+            danmaku = null,
+            pubDate = null,
+            pubDateText = subtitle,
+        )
+    }
+
+    private fun normalizeEpisodeOrder(list: List<BangumiEpisode>): List<BangumiEpisode> {
+        if (list.size <= 1) return list
+
+        data class Entry(
+            val episode: BangumiEpisode,
+            val hasNumber: Boolean,
+            val number: Double,
+            val originalIndex: Int,
+        )
+
+        val entries =
+            list.mapIndexed { index, ep ->
+                val num =
+                    parseEpisodeNumber(ep.title)
+                        ?: parseEpisodeNumber(ep.longTitle)
+                Entry(
+                    episode = ep,
+                    hasNumber = num != null,
+                    number = num ?: 0.0,
+                    originalIndex = index,
+                )
+            }
+
+        // Keep non-numeric items grouped after numeric episodes, while preserving their relative order.
+        return entries
+            .sortedWith(compareBy<Entry>({ !it.hasNumber }, { it.number }, { it.originalIndex }))
+            .map { it.episode }
+    }
+
+    private fun parseEpisodeNumber(raw: String?): Double? {
+        val s = raw?.trim().orEmpty()
+        if (s.isBlank()) return null
+        s.toDoubleOrNull()?.let { return it }
+        val match = EP_NUMBER_REGEX.find(s) ?: return null
+        return match.value.toDoubleOrNull()
+    }
+
+    private fun cardStableKey(card: VideoCard): String =
+        buildString {
+            append(card.bvid)
+            append('|')
+            append(card.cid ?: -1L)
+            append('|')
+            append(card.aid ?: -1L)
+            append('|')
+            append(card.epId ?: -1L)
+            append('|')
+            append(card.title)
+        }
 
     companion object {
         const val EXTRA_SEASON_ID: String = "season_id"

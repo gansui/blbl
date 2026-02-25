@@ -26,6 +26,11 @@ data class BangumiEpisode(
     val badge: String?,
 )
 
+data class BangumiEpisodeSection(
+    val title: String,
+    val episodes: List<BangumiEpisode>,
+)
+
 data class BangumiSeasonDetail(
     val seasonId: Long,
     val title: String,
@@ -36,5 +41,6 @@ data class BangumiSeasonDetail(
     val views: Long?,
     val danmaku: Long?,
     val episodes: List<BangumiEpisode>,
+    val extraSections: List<BangumiEpisodeSection>,
     val progressLastEpId: Long?,
 )

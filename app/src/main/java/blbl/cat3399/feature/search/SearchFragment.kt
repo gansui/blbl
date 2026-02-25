@@ -1,6 +1,7 @@
 package blbl.cat3399.feature.search
 
 import android.os.Bundle
+import android.content.Intent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -9,7 +10,7 @@ import blbl.cat3399.R
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.model.BangumiSeason
 import blbl.cat3399.databinding.FragmentSearchBinding
-import blbl.cat3399.feature.my.MyBangumiDetailFragment
+import blbl.cat3399.feature.my.BangumiDetailActivity
 import blbl.cat3399.ui.BackPressHandler
 import blbl.cat3399.ui.RefreshKeyHandler
 
@@ -96,22 +97,11 @@ class SearchFragment : Fragment(), BackPressHandler, RefreshKeyHandler {
     }
 
     internal fun openBangumiDetail(season: BangumiSeason, isDrama: Boolean) {
-        if (!isAdded || parentFragmentManager.isStateSaved) return
-        // Use add+hide instead of replace so SearchFragment's view state (results panel, scroll, focus)
-        // is preserved when returning from the detail page, matching the behavior of activity navigations.
-        parentFragmentManager.beginTransaction()
-            .setReorderingAllowed(true)
-            .hide(this)
-            .add(
-                R.id.main_container,
-                MyBangumiDetailFragment.newInstance(
-                    seasonId = season.seasonId,
-                    isDrama = isDrama,
-                    continueEpId = null,
-                    continueEpIndex = null,
-                ),
-            )
-            .addToBackStack(null)
-            .commit()
+        if (!isAdded) return
+        startActivity(
+            Intent(requireContext(), BangumiDetailActivity::class.java)
+                .putExtra(BangumiDetailActivity.EXTRA_SEASON_ID, season.seasonId)
+                .putExtra(BangumiDetailActivity.EXTRA_IS_DRAMA, isDrama),
+        )
     }
 }

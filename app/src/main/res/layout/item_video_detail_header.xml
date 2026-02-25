@@ -8,16 +8,40 @@
     android:paddingEnd="16dp"
     android:paddingBottom="12dp">
 
-    <com.google.android.material.imageview.ShapeableImageView
-        android:id="@+id/iv_cover"
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/cl_cover_container"
         android:layout_width="480dp"
         android:layout_height="0dp"
-        android:contentDescription="@string/app_name"
-        android:scaleType="centerCrop"
         app:layout_constraintDimensionRatio="16:9"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:shapeAppearanceOverlay="@style/ShapeAppearanceOverlay_Blbl_Rounded" />
+        app:layout_constraintTop_toTopOf="parent">
+
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/iv_cover"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:contentDescription="@string/app_name"
+            android:scaleType="centerCrop"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:shapeAppearanceOverlay="@style/ShapeAppearanceOverlay_Blbl_Rounded" />
+
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/iv_cover_poster"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:contentDescription="@string/app_name"
+            android:scaleType="centerCrop"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintDimensionRatio="H,9:16"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:shapeAppearanceOverlay="@style/ShapeAppearanceOverlay_Blbl_Rounded" />
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
     <TextView
         android:id="@+id/tv_title"
@@ -31,8 +55,24 @@
         android:textSize="30sp"
         android:textStyle="bold"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@id/iv_cover"
-        app:layout_constraintTop_toTopOf="@id/iv_cover" />
+        app:layout_constraintStart_toEndOf="@id/cl_cover_container"
+        app:layout_constraintTop_toTopOf="@id/cl_cover_container" />
+
+    <TextView
+        android:id="@+id/tv_meta"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="12dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="18sp"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="@id/tv_title"
+        app:layout_constraintTop_toBottomOf="@id/tv_title" />
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/card_up"
@@ -48,7 +88,7 @@
         app:strokeColor="?attr/blblFocusStrokeColor"
         app:strokeWidth="2dp"
         app:layout_constraintStart_toStartOf="@id/tv_title"
-        app:layout_constraintTop_toBottomOf="@id/tv_title">
+        app:layout_constraintTop_toBottomOf="@id/tv_meta">
 
         <LinearLayout
             android:layout_width="wrap_content"
@@ -94,6 +134,35 @@
         app:layout_constraintStart_toStartOf="@id/tv_title"
         app:layout_constraintTop_toBottomOf="@id/card_up" />
 
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/card_tab"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:stateListAnimator="@animator/blbl_focus_scale"
+        android:visibility="gone"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="0dp"
+        app:strokeColor="?attr/blblFocusStrokeColor"
+        app:strokeWidth="2dp"
+        app:layout_constraintStart_toStartOf="@id/tv_title"
+        app:layout_constraintTop_toBottomOf="@id/tv_desc">
+
+        <TextView
+            android:id="@+id/tv_tab"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="10dp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="18sp" />
+    </com.google.android.material.card.MaterialCardView>
+
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_play"
         android:layout_width="wrap_content"
@@ -108,26 +177,182 @@
         app:strokeColor="?attr/blblFocusStrokeColor"
         app:strokeWidth="2dp"
         app:layout_constraintStart_toStartOf="@id/tv_title"
-        app:layout_constraintTop_toBottomOf="@id/tv_desc" />
+        app:layout_constraintTop_toBottomOf="@id/card_tab" />
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/btn_like"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="12dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:stateListAnimator="@animator/blbl_focus_scale"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="0dp"
+        app:strokeColor="?attr/blblFocusStrokeColor"
+        app:strokeWidth="2dp"
+        app:layout_constraintBottom_toBottomOf="@id/btn_play"
+        app:layout_constraintStart_toEndOf="@id/btn_play"
+        app:layout_constraintTop_toTopOf="@id/btn_play">
+
+        <ImageView
+            android:id="@+id/iv_like"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@string/app_name"
+            android:padding="10dp"
+            android:src="@drawable/ic_action_like"
+            android:tint="?android:attr/textColorSecondary" />
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/btn_coin"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="12dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:stateListAnimator="@animator/blbl_focus_scale"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="0dp"
+        app:strokeColor="?attr/blblFocusStrokeColor"
+        app:strokeWidth="2dp"
+        app:layout_constraintBottom_toBottomOf="@id/btn_like"
+        app:layout_constraintStart_toEndOf="@id/btn_like"
+        app:layout_constraintTop_toTopOf="@id/btn_like">
+
+        <ImageView
+            android:id="@+id/iv_coin"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@string/app_name"
+            android:padding="10dp"
+            android:src="@drawable/ic_action_coin"
+            android:tint="?android:attr/textColorSecondary" />
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/btn_fav"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="12dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:stateListAnimator="@animator/blbl_focus_scale"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="0dp"
+        app:strokeColor="?attr/blblFocusStrokeColor"
+        app:strokeWidth="2dp"
+        app:layout_constraintBottom_toBottomOf="@id/btn_coin"
+        app:layout_constraintStart_toEndOf="@id/btn_coin"
+        app:layout_constraintTop_toTopOf="@id/btn_coin">
+
+        <ImageView
+            android:id="@+id/iv_fav"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@string/app_name"
+            android:padding="10dp"
+            android:src="@drawable/ic_action_fav"
+            android:tint="?android:attr/textColorSecondary" />
+    </com.google.android.material.card.MaterialCardView>
+
+    <androidx.constraintlayout.widget.Barrier
+        android:id="@+id/barrier_play_row_end"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:barrierAllowsGoneWidgets="false"
+        app:barrierDirection="end"
+        app:constraint_referenced_ids="btn_play,btn_like,btn_coin,btn_fav" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_secondary"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:focusable="true"
+        android:stateListAnimator="@animator/blbl_focus_scale"
+        android:text="@string/my_btn_followed"
+        android:textSize="22sp"
+        android:textAllCaps="false"
+        android:visibility="gone"
+        app:cornerRadius="14dp"
+        app:strokeColor="?attr/blblFocusStrokeColor"
+        app:strokeWidth="2dp"
+        app:layout_constraintBottom_toBottomOf="@id/btn_play"
+        app:layout_constraintStart_toEndOf="@id/barrier_play_row_end"
+        app:layout_constraintTop_toTopOf="@id/btn_play" />
 
     <androidx.constraintlayout.widget.Barrier
         android:id="@+id/barrier_top_info_bottom"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         app:barrierDirection="bottom"
-        app:constraint_referenced_ids="iv_cover,btn_play" />
+        app:constraint_referenced_ids="cl_cover_container,btn_play" />
 
     <TextView
         android:id="@+id/tv_parts_header"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="20dp"
         android:text="分P"
         android:textColor="?attr/colorOnSurface"
         android:textSize="22sp"
-        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/barrier_top_info_bottom" />
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/btn_parts_order"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
+        android:layout_marginStart="10dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:stateListAnimator="@animator/blbl_focus_scale"
+        android:visibility="gone"
+        app:cardBackgroundColor="?attr/colorSurface"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="0dp"
+        app:strokeColor="?attr/blblFocusStrokeColor"
+        app:strokeWidth="2dp"
+        app:layout_constraintStart_toEndOf="@id/tv_parts_header"
+        app:layout_constraintTop_toTopOf="@id/tv_parts_header">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="10dp">
+
+            <ImageView
+                android:id="@+id/iv_parts_order_icon"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginEnd="6dp"
+                android:contentDescription="@string/my_episode_order"
+                android:src="@drawable/ic_sort"
+                android:tint="?android:attr/textColorSecondary" />
+
+            <TextView
+                android:id="@+id/tv_parts_order"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="14sp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <androidx.constraintlayout.widget.Barrier
+        android:id="@+id/barrier_parts_header_bottom"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:barrierAllowsGoneWidgets="true"
+        app:barrierDirection="bottom"
+        app:constraint_referenced_ids="tv_parts_header,btn_parts_order" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_parts"
@@ -138,19 +363,68 @@
         android:paddingVertical="8dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/tv_parts_header" />
+        app:layout_constraintTop_toBottomOf="@id/barrier_parts_header_bottom" />
 
     <TextView
         android:id="@+id/tv_season_header"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:text="合集"
         android:textColor="?attr/colorOnSurface"
         android:textSize="22sp"
-        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/recycler_parts" />
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/btn_season_order"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
+        android:layout_marginStart="10dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:stateListAnimator="@animator/blbl_focus_scale"
+        android:visibility="gone"
+        app:cardBackgroundColor="?attr/colorSurface"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="0dp"
+        app:strokeColor="?attr/blblFocusStrokeColor"
+        app:strokeWidth="2dp"
+        app:layout_constraintStart_toEndOf="@id/tv_season_header"
+        app:layout_constraintTop_toTopOf="@id/tv_season_header">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="10dp">
+
+            <ImageView
+                android:id="@+id/iv_season_order_icon"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginEnd="6dp"
+                android:contentDescription="@string/my_episode_order"
+                android:src="@drawable/ic_sort"
+                android:tint="?android:attr/textColorSecondary" />
+
+            <TextView
+                android:id="@+id/tv_season_order"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="14sp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <androidx.constraintlayout.widget.Barrier
+        android:id="@+id/barrier_season_header_bottom"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:barrierAllowsGoneWidgets="false"
+        app:barrierDirection="bottom"
+        app:constraint_referenced_ids="tv_season_header,btn_season_order" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_season"
@@ -161,14 +435,14 @@
         android:paddingVertical="8dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/tv_season_header" />
+        app:layout_constraintTop_toBottomOf="@id/barrier_season_header_bottom" />
 
     <androidx.constraintlayout.widget.Barrier
         android:id="@+id/barrier_recommend_top"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         app:barrierDirection="bottom"
-        app:constraint_referenced_ids="iv_cover,btn_play,recycler_parts,recycler_season" />
+        app:constraint_referenced_ids="cl_cover_container,btn_play,recycler_parts,recycler_season" />
 
     <TextView
         android:id="@+id/tv_recommend_header"

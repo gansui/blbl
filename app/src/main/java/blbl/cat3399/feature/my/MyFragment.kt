@@ -1,5 +1,6 @@
 package blbl.cat3399.feature.my
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -54,20 +55,14 @@ class MyFragment : Fragment(), BackPressHandler, MyNavigator {
     }
 
     override fun openBangumiDetail(seasonId: Long, isDrama: Boolean, continueEpId: Long?, continueEpIndex: Int?) {
-        if (_binding == null || childFragmentManager.isStateSaved) return
-        childFragmentManager.beginTransaction()
-            .setReorderingAllowed(true)
-            .replace(
-                R.id.my_container,
-                MyBangumiDetailFragment.newInstance(
-                    seasonId = seasonId,
-                    isDrama = isDrama,
-                    continueEpId = continueEpId,
-                    continueEpIndex = continueEpIndex,
-                ),
-            )
-            .addToBackStack(null)
-            .commit()
+        if (!isAdded) return
+        startActivity(
+            Intent(requireContext(), BangumiDetailActivity::class.java)
+                .putExtra(BangumiDetailActivity.EXTRA_SEASON_ID, seasonId)
+                .putExtra(BangumiDetailActivity.EXTRA_IS_DRAMA, isDrama)
+                .apply { continueEpId?.let { putExtra(BangumiDetailActivity.EXTRA_CONTINUE_EP_ID, it) } }
+                .apply { continueEpIndex?.let { putExtra(BangumiDetailActivity.EXTRA_CONTINUE_EP_INDEX, it) } },
+        )
     }
 
     private fun showRootForLoginState() {

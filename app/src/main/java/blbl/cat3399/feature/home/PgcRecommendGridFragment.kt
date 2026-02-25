@@ -1,11 +1,11 @@
 package blbl.cat3399.feature.home
 
 import android.os.Bundle
+import android.content.Intent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -23,7 +23,7 @@ import blbl.cat3399.core.ui.postIfAlive
 import blbl.cat3399.core.ui.postIfAttached
 import blbl.cat3399.databinding.FragmentVideoGridBinding
 import blbl.cat3399.feature.my.BangumiFollowAdapter
-import blbl.cat3399.feature.my.MyBangumiDetailFragment
+import blbl.cat3399.feature.my.BangumiDetailActivity
 import blbl.cat3399.feature.video.VideoGridTabSwitchFocusHost
 import blbl.cat3399.ui.RefreshKeyHandler
 import kotlinx.coroutines.CancellationException
@@ -286,26 +286,13 @@ class PgcRecommendGridFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTa
     }
 
     private fun openBangumiDetail(season: BangumiSeason) {
-        val host = parentFragment ?: return
-        val fm = host.parentFragmentManager
-        if (!isAdded || fm.isStateSaved) return
-
+        if (!isAdded) return
         val isDrama = kind == KIND_CINEMA
-        fm.beginTransaction()
-            .setReorderingAllowed(true)
-            .setMaxLifecycle(host, Lifecycle.State.STARTED)
-            .hide(host)
-            .add(
-                R.id.main_container,
-                MyBangumiDetailFragment.newInstance(
-                    seasonId = season.seasonId,
-                    isDrama = isDrama,
-                    continueEpId = null,
-                    continueEpIndex = null,
-                ),
-            )
-            .addToBackStack(null)
-            .commit()
+        startActivity(
+            Intent(requireContext(), BangumiDetailActivity::class.java)
+                .putExtra(BangumiDetailActivity.EXTRA_SEASON_ID, season.seasonId)
+                .putExtra(BangumiDetailActivity.EXTRA_IS_DRAMA, isDrama),
+        )
     }
 
     private fun restoreFocusIfNeeded() {

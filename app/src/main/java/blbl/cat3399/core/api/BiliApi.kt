@@ -2,6 +2,7 @@ package blbl.cat3399.core.api
 
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.model.BangumiEpisode
+import blbl.cat3399.core.model.BangumiEpisodeSection
 import blbl.cat3399.core.model.BangumiSeason
 import blbl.cat3399.core.model.BangumiSeasonDetail
 import blbl.cat3399.core.model.Danmaku
@@ -755,12 +756,12 @@ object BiliApi {
         val danmaku = stat.optLong("danmakus").takeIf { it > 0 } ?: stat.optLong("danmaku").takeIf { it > 0 }
         val episodes = result.optJSONArray("episodes") ?: JSONArray()
         val sections = result.optJSONArray("section") ?: JSONArray()
-        val epList =
+        val parsed =
             withContext(Dispatchers.Default) {
-                val out = ArrayList<BangumiEpisode>(episodes.length() + 64)
-                val seen = HashSet<Long>(episodes.length() * 2)
+                val seen = HashSet<Long>(episodes.length() * 2 + 64)
 
-                fun appendEpisodes(arr: JSONArray) {
+                fun parseEpisodes(arr: JSONArray): List<BangumiEpisode> {
+                    val out = ArrayList<BangumiEpisode>(arr.length())
                     for (i in 0 until arr.length()) {
                         val ep = arr.optJSONObject(i) ?: continue
                         val parsedEpId = ep.optLong("id").takeIf { it > 0 } ?: ep.optLong("ep_id").takeIf { it > 0 } ?: continue
@@ -778,15 +779,27 @@ object BiliApi {
                             ),
                         )
                     }
+                    return out
                 }
 
-                appendEpisodes(episodes)
+                val mainEpisodes = parseEpisodes(episodes)
+
+                val extraSections = ArrayList<BangumiEpisodeSection>(sections.length())
                 for (i in 0 until sections.length()) {
                     val section = sections.optJSONObject(i) ?: continue
+                    val sectionTitle = section.optString("title", "").trim()
                     val sectionEpisodes = section.optJSONArray("episodes") ?: continue
-                    appendEpisodes(sectionEpisodes)
+                    val parsedEpisodes = parseEpisodes(sectionEpisodes)
+                    if (parsedEpisodes.isEmpty()) continue
+                    extraSections.add(
+                        BangumiEpisodeSection(
+                            title = sectionTitle,
+                            episodes = parsedEpisodes,
+                        ),
+                    )
                 }
-                out
+
+                mainEpisodes to extraSections
             }
 
         val userProgress = result.optJSONObject("user_status")?.optJSONObject("progress") ?: JSONObject()
@@ -804,7 +817,7 @@ object BiliApi {
                 "user_progress.last_ep_id=${rawUserLastEpId ?: -1L} user_progress.last_epid=${rawUserLastEpid ?: -1L} " +
                 "user_progress.last_ep_index=${rawUserLastEpIndex ?: -1} user_progress.last_time=${rawUserLastTime ?: -1L} " +
                 "result.progress.last_ep_id=${rawProgressLastEpId ?: -1L} result.last_ep_id=${rawResultLastEpId ?: -1L} " +
-                "parsed=$progressLastEpId episodes=${epList.size}",
+                "parsed=$progressLastEpId episodes=${parsed.first.size} extra=${parsed.second.sumOf { it.episodes.size }}",
         )
         val resolvedSeasonId = result.optLong("season_id").takeIf { it > 0 } ?: seasonId ?: 0L
         return BangumiSeasonDetail(
@@ -816,7 +829,8 @@ object BiliApi {
             ratingScore = ratingScore,
             views = views,
             danmaku = danmaku,
-            episodes = epList,
+            episodes = parsed.first,
+            extraSections = parsed.second,
             progressLastEpId = progressLastEpId,
         )
     }

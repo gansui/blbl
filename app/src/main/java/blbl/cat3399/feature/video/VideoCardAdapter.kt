@@ -19,6 +19,7 @@ class VideoCardAdapter(
     private val fixedItemWidthDimenRes: Int? = null,
     private val fixedItemMarginDimenRes: Int? = null,
     private val stableIdKey: ((VideoCard) -> String)? = null,
+    private val isSelected: ((VideoCard, Int) -> Boolean)? = null,
 ) : RecyclerView.Adapter<VideoCardAdapter.Vh>() {
     private val items = ArrayList<VideoCard>()
 
@@ -62,7 +63,7 @@ class VideoCardAdapter(
         return Vh(binding, fixedItemWidthDimenRes, fixedItemMarginDimenRes)
     }
 
-    override fun onBindViewHolder(holder: Vh, position: Int) = holder.bind(items[position], onClick, onLongClick)
+    override fun onBindViewHolder(holder: Vh, position: Int) = holder.bind(items[position], position, onClick, onLongClick, isSelected)
 
     override fun getItemCount(): Int = items.size
 
@@ -75,7 +76,17 @@ class VideoCardAdapter(
             applyFixedSizing()
         }
 
-        fun bind(item: VideoCard, onClick: (VideoCard, Int) -> Unit, onLongClick: ((VideoCard, Int) -> Boolean)?) {
+        fun bind(
+            item: VideoCard,
+            position: Int,
+            onClick: (VideoCard, Int) -> Unit,
+            onLongClick: ((VideoCard, Int) -> Boolean)?,
+            isSelected: ((VideoCard, Int) -> Boolean)?,
+        ) {
+            applyFixedSizing()
+
+            binding.root.isSelected = isSelected?.invoke(item, position) == true
+
             binding.tvTitle.text = item.title
             binding.tvSubtitle.text =
                 item.pubDateText
@@ -83,9 +94,24 @@ class VideoCardAdapter(
             val pubDateText = item.pubDate?.let { Format.pubDateText(it) }.orEmpty()
             binding.tvPubdate.text = pubDateText
             binding.tvPubdate.isVisible = pubDateText.isNotBlank()
-            binding.tvDuration.text = Format.duration(item.durationSec)
-            binding.tvView.text = Format.count(item.view)
-            binding.tvDanmaku.text = Format.count(item.danmaku)
+
+            val showDuration = item.durationSec > 0
+            binding.tvDuration.isVisible = showDuration
+            if (showDuration) {
+                binding.tvDuration.text = Format.duration(item.durationSec)
+            }
+
+            val viewCount = item.view?.takeIf { it > 0 }
+            val danmakuCount = item.danmaku?.takeIf { it > 0 }
+            val showStats = viewCount != null || danmakuCount != null
+            binding.llStats.isVisible = showStats
+            binding.ivStatPlay.isVisible = viewCount != null
+            binding.tvView.isVisible = viewCount != null
+            binding.ivStatDanmaku.isVisible = danmakuCount != null
+            binding.tvDanmaku.isVisible = danmakuCount != null
+            viewCount?.let { binding.tvView.text = Format.count(it) }
+            danmakuCount?.let { binding.tvDanmaku.text = Format.count(it) }
+
             binding.tvChargeBadge.isVisible = item.isChargingArc
             ImageLoader.loadInto(binding.ivCover, ImageUrl.cover(item.coverUrl))
 

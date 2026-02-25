@@ -24,6 +24,7 @@ import blbl.cat3399.core.ui.Immersive
 import blbl.cat3399.core.ui.ThemeColor
 import blbl.cat3399.core.ui.cloneInUserScale
 import blbl.cat3399.core.util.parseBangumiRedirectUrl
+import blbl.cat3399.core.util.Format
 import blbl.cat3399.databinding.ActivityVideoDetailBinding
 import blbl.cat3399.feature.following.UpDetailActivity
 import blbl.cat3399.feature.my.BangumiDetailActivity
@@ -60,16 +61,20 @@ class VideoDetailActivity : BaseActivity() {
     private var coverUrl: String? = null
     private var title: String? = null
     private var desc: String? = null
+    private var metaText: String? = null
+    private var tabName: String? = null
 
     private var playlistToken: String? = null
     private var playlistIndex: Int? = null
 
     private var currentParts: List<PlayerPlaylistItem> = emptyList()
     private var currentPartsUiCards: List<blbl.cat3399.core.model.VideoCard> = emptyList()
+    private var partsOrderReversed: Boolean = false
     private var currentUgcSeasonTitle: String? = null
     private var currentUgcSeasonItems: List<PlayerPlaylistItem> = emptyList()
     private var currentUgcSeasonUiCards: List<blbl.cat3399.core.model.VideoCard> = emptyList()
     private var currentUgcSeasonIndex: Int? = null
+    private var seasonOrderReversed: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -181,8 +186,23 @@ class VideoDetailActivity : BaseActivity() {
             VideoDetailHeaderAdapter(
                 onPlayClick = { playCurrentFromHeader() },
                 onUpClick = { openUpDetail() },
-                onPartClick = { _, index -> playPart(index) },
-                onSeasonClick = { _, index -> playSeasonItem(index) },
+                onTabClick = { tab ->
+                    AppToast.show(this, "暂不支持：$tab")
+                },
+                onLikeClick = { AppToast.show(this, "暂不支持点赞") },
+                onCoinClick = { AppToast.show(this, "暂不支持投币") },
+                onFavClick = { AppToast.show(this, "暂不支持收藏") },
+                onSecondaryClick = { /* video detail has no secondary action yet */ },
+                onPartsOrderClick = {
+                    partsOrderReversed = !partsOrderReversed
+                    applyHeader()
+                },
+                onSeasonOrderClick = {
+                    seasonOrderReversed = !seasonOrderReversed
+                    applyHeader()
+                },
+                onPartCardClick = { card, _ -> playPartByUiCard(card) },
+                onSeasonCardClick = { card, _ -> playSeasonByUiCard(card) },
             )
 
         recommendAdapter =
@@ -251,14 +271,25 @@ class VideoDetailActivity : BaseActivity() {
 
         headerAdapter.update(
             title = title,
+            metaText = metaText,
             desc = desc,
             coverUrl = coverUrl,
+            usePosterCover = false,
             upName = ownerName,
             upAvatar = ownerAvatar,
-            seasonTitle = currentUgcSeasonTitle,
-            parts = currentParts,
-            seasonItems = currentUgcSeasonItems,
-            seasonIndex = currentUgcSeasonIndex,
+            tabName = tabName,
+            primaryButtonText = "播放",
+            secondaryButtonText = null,
+            showActions = true,
+            partsHeaderText = buildPartsHeaderText(cardsCount = currentPartsUiCards.size),
+            partsCards = partsCardsForDisplay(),
+            partsSelectedKey = resolvePartsSelectedKey(),
+            partsOrderReversed = partsOrderReversed,
+            seasonHeaderText = buildSeasonHeaderText(),
+            seasonCards = seasonCardsForDisplay(),
+            seasonSelectedKey = resolveSeasonSelectedKey(),
+            seasonOrderReversed = seasonOrderReversed,
+            recommendHeaderText = "推荐视频",
         )
 
         binding.recycler.post { headerAdapter.requestFocusPlay() }
@@ -323,6 +354,26 @@ class VideoDetailActivity : BaseActivity() {
                     title = viewData.optString("title", "").trim().takeIf { it.isNotBlank() } ?: title
                     desc = viewData.optString("desc", "").trim()
                     coverUrl = viewData.optString("pic", "").trim().takeIf { it.isNotBlank() } ?: coverUrl
+                    tabName = viewData.optString("tname", "").trim().takeIf { it.isNotBlank() }
+
+                    run {
+                        val pubDate = viewData.optLong("pubdate").takeIf { it > 0L }
+                        val stat = viewData.optJSONObject("stat") ?: JSONObject()
+                        val viewCount =
+                            stat.optLong("view").takeIf { it > 0L }
+                                ?: stat.optLong("play").takeIf { it > 0L }
+                        val likeCount = stat.optLong("like").takeIf { it > 0L }
+                        val favCount = stat.optLong("favorite").takeIf { it > 0L }
+                        metaText =
+                            buildList {
+                                pubDate?.let { Format.pubDateText(it) }.takeIf { !it.isNullOrBlank() }?.let(::add)
+                                viewCount?.let { "${Format.count(it)}观看" }?.let(::add)
+                                likeCount?.let { "${Format.count(it)}赞" }?.let(::add)
+                                favCount?.let { "${Format.count(it)}收藏" }?.let(::add)
+                            }.joinToString(" · ")
+                                .trim()
+                                .takeIf { it.isNotBlank() }
+                    }
 
                     val owner = viewData.optJSONObject("owner")
                     ownerMid = owner?.optLong("mid")?.takeIf { it > 0L } ?: ownerMid
@@ -377,17 +428,7 @@ class VideoDetailActivity : BaseActivity() {
                         }
                     if (codeToken != requestToken) return@launch
 
-                    headerAdapter.update(
-                        title = title,
-                        desc = desc,
-                        coverUrl = coverUrl,
-                        upName = ownerName,
-                        upAvatar = ownerAvatar,
-                        seasonTitle = currentUgcSeasonTitle,
-                        parts = currentParts,
-                        seasonItems = currentUgcSeasonItems,
-                        seasonIndex = currentUgcSeasonIndex,
-                    )
+                    applyHeader()
                     recommendAdapter.submit(related)
                 } catch (t: Throwable) {
                     if (t is CancellationException) return@launch
@@ -597,4 +638,90 @@ class VideoDetailActivity : BaseActivity() {
         private const val ACTIVITY_STACK_GROUP: String = "video_detail_flow"
         private const val ACTIVITY_STACK_MAX_DEPTH: Int = 3
     }
+
+    private fun applyHeader() {
+        if (!this::headerAdapter.isInitialized) return
+        headerAdapter.update(
+            title = title,
+            metaText = metaText,
+            desc = desc,
+            coverUrl = coverUrl,
+            usePosterCover = false,
+            upName = ownerName,
+            upAvatar = ownerAvatar,
+            tabName = tabName,
+            primaryButtonText = "播放",
+            secondaryButtonText = null,
+            showActions = true,
+            partsHeaderText = buildPartsHeaderText(cardsCount = currentPartsUiCards.size),
+            partsCards = partsCardsForDisplay(),
+            partsSelectedKey = resolvePartsSelectedKey(),
+            partsOrderReversed = partsOrderReversed,
+            seasonHeaderText = buildSeasonHeaderText(),
+            seasonCards = seasonCardsForDisplay(),
+            seasonSelectedKey = resolveSeasonSelectedKey(),
+            seasonOrderReversed = seasonOrderReversed,
+            recommendHeaderText = "推荐视频",
+        )
+    }
+
+    private fun partsCardsForDisplay(): List<blbl.cat3399.core.model.VideoCard> =
+        if (partsOrderReversed) currentPartsUiCards.asReversed() else currentPartsUiCards
+
+    private fun seasonCardsForDisplay(): List<blbl.cat3399.core.model.VideoCard> =
+        if (seasonOrderReversed) currentUgcSeasonUiCards.asReversed() else currentUgcSeasonUiCards
+
+    private fun buildPartsHeaderText(cardsCount: Int): String? {
+        if (cardsCount <= 1) return null
+        return "分P（$cardsCount）"
+    }
+
+    private fun buildSeasonHeaderText(): String? {
+        val count = currentUgcSeasonUiCards.size
+        if (count <= 1) return null
+        val safeTitle = currentUgcSeasonTitle?.trim().takeIf { !it.isNullOrBlank() }
+        return safeTitle?.let { "合集：$it" } ?: "合集（$count）"
+    }
+
+    private fun resolvePartsSelectedKey(): String? {
+        val pickedCid = cid?.takeIf { it > 0L } ?: return null
+        val card = currentPartsUiCards.firstOrNull { it.cid == pickedCid } ?: return null
+        return cardStableKey(card)
+    }
+
+    private fun resolveSeasonSelectedKey(): String? {
+        val idx = currentUgcSeasonIndex?.takeIf { it >= 0 } ?: return null
+        val card = currentUgcSeasonUiCards.getOrNull(idx) ?: return null
+        return cardStableKey(card)
+    }
+
+    private fun playPartByUiCard(card: blbl.cat3399.core.model.VideoCard) {
+        val pickedCid = card.cid?.takeIf { it > 0L } ?: return
+        val idx = currentPartsUiCards.indexOfFirst { it.cid == pickedCid }.takeIf { it >= 0 } ?: return
+        playPart(idx)
+    }
+
+    private fun playSeasonByUiCard(card: blbl.cat3399.core.model.VideoCard) {
+        val safeBvid = card.bvid.trim().takeIf { it.isNotBlank() }
+        val safeCid = card.cid?.takeIf { it > 0L }
+        val idx =
+            currentUgcSeasonUiCards.indexOfFirst {
+                (safeCid != null && it.cid == safeCid) ||
+                    (safeBvid != null && it.bvid.trim() == safeBvid)
+            }.takeIf { it >= 0 } ?: return
+        playSeasonItem(idx)
+    }
+
+    private fun cardStableKey(card: blbl.cat3399.core.model.VideoCard): String =
+        buildString {
+            append(card.bvid)
+            append('|')
+            append(card.cid ?: -1L)
+            append('|')
+            append(card.aid ?: -1L)
+            append('|')
+            append(card.epId ?: -1L)
+            append('|')
+            append(card.title)
+        }
 }
