@@ -10,6 +10,7 @@ import blbl.cat3399.core.api.BiliApi
 import blbl.cat3399.core.api.BiliApiException
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.model.VideoCard
+import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.ui.AppToast
 import blbl.cat3399.core.ui.FocusTreeUtils
@@ -29,6 +30,23 @@ internal fun PlayerActivity.initBottomCardPanel() {
     binding.tabPageList.setOnClickListener { selectBottomPanelKind(PlayerVideoListKind.PAGE, requestFocus = true) }
     binding.tabPartsList.setOnClickListener { selectBottomPanelKind(PlayerVideoListKind.PARTS, requestFocus = true) }
     binding.tabRecommendList.setOnClickListener { selectBottomPanelKind(PlayerVideoListKind.RECOMMEND, requestFocus = true) }
+
+    fun switchTabOnFocus(kind: PlayerVideoListKind) {
+        if (!isBottomCardPanelVisible()) return
+        if (!BiliClient.prefs.tabSwitchFollowsFocus) return
+        if (bottomCardPanelKind == kind) return
+        selectBottomPanelKind(kind = kind, requestFocus = false)
+    }
+
+    binding.tabPageList.setOnFocusChangeListener { _, hasFocus ->
+        if (hasFocus) switchTabOnFocus(PlayerVideoListKind.PAGE)
+    }
+    binding.tabPartsList.setOnFocusChangeListener { _, hasFocus ->
+        if (hasFocus) switchTabOnFocus(PlayerVideoListKind.PARTS)
+    }
+    binding.tabRecommendList.setOnFocusChangeListener { _, hasFocus ->
+        if (hasFocus) switchTabOnFocus(PlayerVideoListKind.RECOMMEND)
+    }
 
     listOf(binding.tabPageList, binding.tabPartsList, binding.tabRecommendList).forEach { tab ->
         tab.setOnKeyListener { _, keyCode, event ->
