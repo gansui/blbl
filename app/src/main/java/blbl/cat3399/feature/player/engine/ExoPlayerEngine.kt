@@ -41,17 +41,34 @@ import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArraySet
+import kotlin.math.roundToLong
+
+internal data class LiveHlsDebugInfo(
+    val mediaSequence: Long?,
+    val targetDurationSec: Double?,
+    val mapUri: String?,
+    val segmentCount: Int,
+    val recentSegmentCount: Int,
+    val recentBitrateBps: Long?,
+    val lastSegmentUri: String?,
+    val lastSegmentDurationSec: Double?,
+    val lastSegmentBytes: Long?,
+    val lastSegmentSequence: Long?,
+    val lastAuxRaw: String?,
+)
 
 internal class ExoPlayerEngine(
     context: Context,
     private val okHttpClient: OkHttpClient = BiliClient.cdnOkHttp,
     private val onTransferHost: ((kind: DebugStreamKind, host: String) -> Unit)? = null,
+    private val onLiveHlsDebugInfo: ((LiveHlsDebugInfo) -> Unit)? = null,
     audioBalanceLevel: AudioBalanceLevel = AudioBalanceLevel.Off,
 ) : BlblPlayerEngine {
     private val appContext: Context = context.applicationContext
 
     private val volumeBalanceProcessor = VolumeBalanceAudioProcessor(level = audioBalanceLevel)
-    private val liveHlsPlaylistParserFactory: HlsPlaylistParserFactory = ExtXStartStrippingHlsPlaylistParserFactory()
+    private val liveHlsPlaylistParserFactory: HlsPlaylistParserFactory =
+        ExtXStartStrippingHlsPlaylistParserFactory(onPlaylistParsed = onLiveHlsDebugInfo)
 
     val exoPlayer: ExoPlayer =
         ExoPlayer.Builder(context, BlblRenderersFactory(context.applicationContext, volumeBalanceProcessor))
@@ -147,7 +164,7 @@ internal class ExoPlayerEngine(
             is PlaybackSource.Live -> {
                 val url = source.url.trim()
                 val uri = Uri.parse(url)
-                val factory = OkHttpDataSource.Factory(okHttpClient)
+                val factory = createCdnFactory(DebugStreamKind.MAIN, urlCandidates = listOf(url))
 
                 val isM3u8 = url.substringBefore('?').trim().lowercase(Locale.US).endsWith(".m3u8")
                 if (isM3u8) {
@@ -279,25 +296,31 @@ internal class ExoPlayerEngine(
 
 private class ExtXStartStrippingHlsPlaylistParserFactory(
     private val delegate: HlsPlaylistParserFactory = DefaultHlsPlaylistParserFactory(),
+    private val onPlaylistParsed: ((LiveHlsDebugInfo) -> Unit)? = null,
 ) : HlsPlaylistParserFactory {
     override fun createPlaylistParser(): ParsingLoadable.Parser<HlsPlaylist> {
-        return ExtXStartStrippingParser(delegate.createPlaylistParser())
+        return ExtXStartStrippingParser(delegate.createPlaylistParser(), onPlaylistParsed = onPlaylistParsed)
     }
 
     override fun createPlaylistParser(
         multivariantPlaylist: HlsMultivariantPlaylist,
         previousMediaPlaylist: HlsMediaPlaylist?,
     ): ParsingLoadable.Parser<HlsPlaylist> {
-        return ExtXStartStrippingParser(delegate.createPlaylistParser(multivariantPlaylist, previousMediaPlaylist))
+        return ExtXStartStrippingParser(
+            delegate.createPlaylistParser(multivariantPlaylist, previousMediaPlaylist),
+            onPlaylistParsed = onPlaylistParsed,
+        )
     }
 }
 
 private class ExtXStartStrippingParser(
     private val delegate: ParsingLoadable.Parser<HlsPlaylist>,
+    private val onPlaylistParsed: ((LiveHlsDebugInfo) -> Unit)? = null,
 ) : ParsingLoadable.Parser<HlsPlaylist> {
     override fun parse(uri: Uri, inputStream: InputStream): HlsPlaylist {
         val bytes = inputStream.readBytes()
         val text = String(bytes, Charsets.UTF_8)
+        parseLiveHlsDebugInfo(text = text)?.let { info -> onPlaylistParsed?.invoke(info) }
         if (!text.contains("#EXT-X-START", ignoreCase = true)) {
             return delegate.parse(uri, ByteArrayInputStream(bytes))
         }
@@ -310,6 +333,124 @@ private class ExtXStartStrippingParser(
         return delegate.parse(uri, ByteArrayInputStream(filtered.toByteArray(Charsets.UTF_8)))
     }
 }
+
+private data class ParsedLiveHlsSegment(
+    val durationSec: Double,
+    val uri: String,
+    val bytes: Long?,
+    val auxRaw: String?,
+)
+
+private fun parseLiveHlsDebugInfo(text: String): LiveHlsDebugInfo? {
+    var mediaSequence: Long? = null
+    var targetDurationSec: Double? = null
+    var mapUri: String? = null
+    var pendingDurationSec: Double? = null
+    var pendingAuxRaw: String? = null
+    val segments = ArrayList<ParsedLiveHlsSegment>()
+
+    for (rawLine in text.lineSequence()) {
+        val line = rawLine.trim()
+        if (line.isBlank()) continue
+        when {
+            line.startsWith("#EXT-X-MEDIA-SEQUENCE:", ignoreCase = true) -> {
+                mediaSequence = line.substringAfter(':').trim().toLongOrNull()
+            }
+
+            line.startsWith("#EXT-X-TARGETDURATION:", ignoreCase = true) -> {
+                targetDurationSec = line.substringAfter(':').trim().toDoubleOrNull()
+            }
+
+            line.startsWith("#EXT-X-MAP:", ignoreCase = true) -> {
+                mapUri = parseHlsQuotedAttr(line = line, key = "URI")
+            }
+
+            line.startsWith("#EXT-BILI-AUX:", ignoreCase = true) -> {
+                pendingAuxRaw = line.substringAfter(':').trim().ifBlank { null }
+            }
+
+            line.startsWith("#EXTINF:", ignoreCase = true) -> {
+                pendingDurationSec = line.substringAfter(':').substringBefore(',').trim().toDoubleOrNull()
+            }
+
+            line.startsWith("#") -> Unit
+
+            else -> {
+                val durationSec = pendingDurationSec
+                if (durationSec != null && durationSec > 0.0) {
+                    segments +=
+                        ParsedLiveHlsSegment(
+                            durationSec = durationSec,
+                            uri = line,
+                            bytes = parseLiveHlsAuxBytes(pendingAuxRaw),
+                            auxRaw = pendingAuxRaw,
+                        )
+                }
+                pendingDurationSec = null
+                pendingAuxRaw = null
+            }
+        }
+    }
+
+    val last = segments.lastOrNull()
+    val recentSegments = segments.takeLast(LIVE_HLS_DEBUG_RECENT_SEGMENT_COUNT)
+    val recentWithBytes = recentSegments.filter { it.bytes != null && it.durationSec > 0.0 }
+    val recentDurationSec = recentWithBytes.sumOf { it.durationSec }
+    val recentBytes = recentWithBytes.sumOf { it.bytes ?: 0L }
+    val recentBitrateBps =
+        if (recentBytes > 0L && recentDurationSec > 0.0) {
+            ((recentBytes * 8.0) / recentDurationSec).roundToLong()
+        } else {
+            null
+        }
+    val lastSegmentSequence =
+        if (mediaSequence != null && last != null) {
+            mediaSequence + segments.lastIndex.toLong()
+        } else {
+            null
+        }
+
+    val info =
+        LiveHlsDebugInfo(
+            mediaSequence = mediaSequence,
+            targetDurationSec = targetDurationSec,
+            mapUri = mapUri,
+            segmentCount = segments.size,
+            recentSegmentCount = recentWithBytes.size,
+            recentBitrateBps = recentBitrateBps,
+            lastSegmentUri = last?.uri,
+            lastSegmentDurationSec = last?.durationSec,
+            lastSegmentBytes = last?.bytes,
+            lastSegmentSequence = lastSegmentSequence,
+            lastAuxRaw = last?.auxRaw,
+        )
+    return if (
+        info.mediaSequence != null ||
+        info.targetDurationSec != null ||
+        !info.mapUri.isNullOrBlank() ||
+        !info.lastSegmentUri.isNullOrBlank() ||
+        !info.lastAuxRaw.isNullOrBlank()
+    ) {
+        info
+    } else {
+        null
+    }
+}
+
+private fun parseHlsQuotedAttr(line: String, key: String): String? {
+    val pattern = Regex("""(?:^|,)${Regex.escape(key)}=\"([^\"]+)\"""")
+    return pattern.find(line)?.groupValues?.getOrNull(1)?.trim()?.ifBlank { null }
+}
+
+private fun parseLiveHlsAuxBytes(auxRaw: String?): Long? {
+    val parts = auxRaw?.split('|') ?: return null
+    val value = parts.getOrNull(2)?.trim().orEmpty()
+    if (value.isBlank()) return null
+    return value.toLongOrNull()
+        ?: value.toLongOrNull(radix = 16)
+}
+
+private const val LIVE_HLS_DEBUG_RECENT_SEGMENT_COUNT = 3
 
 private class BlblRenderersFactory(
     context: Context,

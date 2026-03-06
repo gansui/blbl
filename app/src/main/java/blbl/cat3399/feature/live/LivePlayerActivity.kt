@@ -22,10 +22,15 @@ import android.widget.FrameLayout
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DecoderReuseEvaluation
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime
 import androidx.media3.ui.AspectRatioFrameLayout
 import blbl.cat3399.core.api.BiliApi
 import blbl.cat3399.core.api.BiliApiException
@@ -47,6 +52,7 @@ import blbl.cat3399.core.ui.popup.PopupHost
 import blbl.cat3399.databinding.ActivityPlayerBinding
 import blbl.cat3399.databinding.DialogLiveChatBinding
 import blbl.cat3399.feature.player.AudioBalanceLevel
+import blbl.cat3399.feature.player.PlayerDebugMetrics
 import blbl.cat3399.feature.player.PlayerOsdSizing
 import blbl.cat3399.feature.player.PlayerSettingsAdapter
 import blbl.cat3399.feature.player.PlayerUiMode
@@ -57,6 +63,7 @@ import blbl.cat3399.feature.player.engine.ExoPlayerEngine
 import blbl.cat3399.feature.player.engine.IjkPlayerPlugin
 import blbl.cat3399.feature.player.engine.IjkPlayerPluginUi
 import blbl.cat3399.feature.player.engine.IjkPlayerEngine
+import blbl.cat3399.feature.player.engine.LiveHlsDebugInfo
 import blbl.cat3399.feature.player.engine.PlayerEngineKind
 import blbl.cat3399.feature.player.engine.PlaybackSource
 import kotlinx.coroutines.CancellationException
@@ -65,6 +72,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class LivePlayerActivity : BaseActivity() {
     override fun shouldRecreateOnUiScaleChange(): Boolean = false
@@ -106,6 +115,8 @@ class LivePlayerActivity : BaseActivity() {
     private var roomUname: String = ""
 
     private var session: LiveSession = LiveSession()
+    private val debug = PlayerDebugMetrics()
+    @Volatile private var liveHlsDebugInfo: LiveHlsDebugInfo? = null
 
     private var lastPlay: BiliApi.LivePlayUrl? = null
     private var lastLiveStatus: Int = 0
@@ -174,11 +185,51 @@ class LivePlayerActivity : BaseActivity() {
                 PlayerEngineKind.ExoPlayer ->
                     ExoPlayerEngine(
                         context = this,
+                        onTransferHost = { _, host ->
+                            debug.videoTransferHost = host
+                        },
+                        onLiveHlsDebugInfo = { info ->
+                            liveHlsDebugInfo = info
+                        },
                         audioBalanceLevel = AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel),
                     )
             }
         player = engine
         applyRenderForEngine(engine, prefs)
+        (engine as? ExoPlayerEngine)?.exoPlayer?.addAnalyticsListener(
+            object : AnalyticsListener {
+                override fun onVideoDecoderInitialized(
+                    eventTime: EventTime,
+                    decoderName: String,
+                    initializedTimestampMs: Long,
+                    initializationDurationMs: Long,
+                ) {
+                    debug.videoDecoderName = decoderName
+                }
+
+                override fun onVideoInputFormatChanged(eventTime: EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
+                    debug.videoInputWidth = format.width.takeIf { it > 0 }
+                    debug.videoInputHeight = format.height.takeIf { it > 0 }
+                    debug.videoInputFps = format.frameRate.takeIf { it > 0f }
+                }
+
+                override fun onDroppedVideoFrames(eventTime: EventTime, droppedFrames: Int, elapsedMs: Long) {
+                    debug.droppedFramesTotal += droppedFrames.toLong().coerceAtLeast(0L)
+                }
+
+                override fun onVideoFrameProcessingOffset(eventTime: EventTime, totalProcessingOffsetUs: Long, frameCount: Int) {
+                    val now = eventTime.realtimeMs
+                    val last = debug.renderFpsLastAtMs
+                    debug.renderFpsLastAtMs = now
+                    if (last == null) return
+                    val deltaMs = now - last
+                    if (deltaMs <= 0L || deltaMs > 60_000L) return
+                    val frames = frameCount.coerceAtLeast(0)
+                    if (frames == 0) return
+                    debug.renderFps = (frames * 1000f) / deltaMs.toFloat()
+                }
+            },
+        )
         liveDanmakuBaseUptimeMs = SystemClock.elapsedRealtime()
         liveDanmakuLastAppendMs = Int.MIN_VALUE
         binding.danmakuView.setPositionProvider { liveDanmakuPositionMs() }
@@ -206,9 +257,18 @@ class LivePlayerActivity : BaseActivity() {
                     noteUserInteraction()
                 }
 
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_BUFFERING && debug.lastPlaybackState != Player.STATE_BUFFERING && engine.playWhenReady) {
+                        debug.rebufferCount++
+                    }
+                    debug.lastPlaybackState = playbackState
+                }
+
                 override fun onVideoSizeChanged(width: Int, height: Int) {
                     if (engine.kind != PlayerEngineKind.IjkPlayer) return
                     if (width <= 0 || height <= 0) return
+                    debug.videoInputWidth = width
+                    debug.videoInputHeight = height
                     binding.ijkAspect.setAspectRatio(width.toFloat() / height.toFloat())
                 }
             },
@@ -635,6 +695,16 @@ class LivePlayerActivity : BaseActivity() {
                 return true
             }
 
+            PlayerCustomShortcutAction.ToggleDebugOverlay -> {
+                noteUserInteraction()
+                session = session.copy(debugEnabled = !session.debugEnabled)
+                updateDebugOverlay()
+                refreshSettings()
+                val state = if (session.debugEnabled) "开" else "关"
+                showShortcutHint("调试信息：$state")
+                return true
+            }
+
             else -> return false
         }
     }
@@ -664,6 +734,11 @@ class LivePlayerActivity : BaseActivity() {
                     "线路选择" -> showLineDialog()
                     "音频平衡" -> showAudioBalanceDialog()
                     "播放器内核" -> showPlayerEngineDialog()
+                    "调试信息" -> {
+                        session = session.copy(debugEnabled = !session.debugEnabled)
+                        updateDebugOverlay()
+                        refreshSettings()
+                    }
                     else -> AppToast.show(this, "暂未实现：${item.title}")
                 }
             }
@@ -753,6 +828,7 @@ class LivePlayerActivity : BaseActivity() {
                 PlayerSettingsAdapter.SettingItem("线路选择", lineLabel),
                 PlayerSettingsAdapter.SettingItem("音频平衡", balanceLabel),
                 PlayerSettingsAdapter.SettingItem("播放器内核", engineLabel),
+                PlayerSettingsAdapter.SettingItem("调试信息", if (session.debugEnabled) "开" else "关"),
             )
         (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.submit(list)
     }
@@ -1127,6 +1203,9 @@ class LivePlayerActivity : BaseActivity() {
                     ?: play.lines.firstOrNull()
             if (pickedLine == null) error("No playable live url")
 
+            debug.reset()
+            debug.cdnHost = runCatching { Uri.parse(pickedLine.url).host?.lowercase(Locale.US) }.getOrNull()
+            liveHlsDebugInfo = null
             engine.setSource(PlaybackSource.Live(url = pickedLine.url))
             engine.prepare()
             engine.playWhenReady = true
@@ -1329,40 +1408,260 @@ class LivePlayerActivity : BaseActivity() {
         binding.danmakuView.setDebugEnabled(enabled)
         debugJob?.cancel()
         if (!enabled) return
-        val exo = player ?: return
+        val engine = player ?: return
         debugJob =
             lifecycleScope.launch {
                 while (isActive) {
-                    val play = lastPlay
                     binding.tvDebug.text =
-                        buildString {
-                            append("room=").append(realRoomId)
-                            append(" qn=").append(play?.currentQn ?: 0)
-                            append(" line=").append(session.lineOrder)
-                            append(" pos=").append(exo.currentPosition).append("ms")
-                            buildDebugDisplayText()?.let { disp ->
-                                append('\n')
-                                append("disp=").append(disp)
-                            }
-                            runCatching { binding.danmakuView.getDebugStats() }.getOrNull()?.let { dm ->
-                                append('\n')
-                                append("dm=").append(if (dm.configEnabled) "on" else "off")
-                                append(" fps=").append(String.format(Locale.US, "%.1f", dm.drawFps))
-                                append(" act=").append(dm.lastFrameActive)
-                                append(" pend=").append(dm.lastFramePending)
-                                append(" hit=").append(dm.lastFrameCachedDrawn).append('/').append(dm.lastFrameActive)
-                                append(" fb=").append(dm.lastFrameFallbackDrawn)
-                                append(" q=").append(dm.queueDepth)
-                                if (dm.invalidateFull) {
-                                    append(" inv=full")
-                                } else {
-                                    append(" inv=").append(dm.invalidateTopPx).append('-').append(dm.invalidateBottomPx)
-                                }
-                            }
+                        when (engine) {
+                            is ExoPlayerEngine -> buildExoDebugText(engine.exoPlayer)
+                            is IjkPlayerEngine -> buildIjkDebugText(engine)
+                            else -> "-"
                         }
                     delay(500)
                 }
             }
+    }
+
+    private fun buildExoDebugText(exo: ExoPlayer): String {
+        updateDebugVideoStatsFromCounters(exo)
+        val trackFormat = pickSelectedVideoFormat(exo)
+        val trackBitrate =
+            trackFormat
+                ?.let { format ->
+                    format.averageBitrate.takeIf { it > 0 }
+                        ?: format.bitrate.takeIf { it > 0 }
+                        ?: format.peakBitrate.takeIf { it > 0 }
+                }?.toLong()
+        val brBps = liveHlsDebugInfo?.recentBitrateBps?.takeIf { it > 0L } ?: trackBitrate
+        val state =
+            when (exo.playbackState) {
+                Player.STATE_IDLE -> "IDLE"
+                Player.STATE_BUFFERING -> "BUFFERING"
+                Player.STATE_READY -> "READY"
+                Player.STATE_ENDED -> "ENDED"
+                else -> exo.playbackState.toString()
+            }
+        return buildString {
+            appendLiveDebugHeader(this, state = state, isPlaying = exo.isPlaying, playWhenReady = exo.playWhenReady)
+            append("pos=").append(exo.currentPosition).append("ms")
+            append(" buf=").append(exo.bufferedPosition).append("ms")
+            append(" spd=").append(String.format(Locale.US, "%.2f", exo.playbackParameters.speed))
+            append('\n')
+
+            append("res=").append(buildDebugResolutionText(exo, trackFormat))
+            append(" fps=").append(formatDebugFps(debug.renderFps) ?: formatDebugFps(debug.videoInputFps ?: trackFormat?.frameRate) ?: "-")
+            append(" br=").append(formatBitrateKbps(brBps))
+            appendCdnHostLine(this)
+
+            buildDebugDisplayText()?.let { disp ->
+                append("disp=").append(disp)
+                append('\n')
+            }
+
+            append("decoder=").append(shortenDebugValue(debug.videoDecoderName ?: "-", maxChars = 64))
+            append(" drop=").append(debug.droppedFramesTotal)
+            append(" rebuffer=").append(debug.rebufferCount)
+            append('\n')
+
+            appendLiveHlsDebug(this)
+            appendDanmakuDebug(this)
+        }
+    }
+
+    private fun buildIjkDebugText(engine: IjkPlayerEngine): String {
+        val snap = engine.debugSnapshot()
+        val state =
+            when (snap.playbackState) {
+                Player.STATE_IDLE -> "IDLE"
+                Player.STATE_BUFFERING -> "BUFFERING"
+                Player.STATE_READY -> "READY"
+                Player.STATE_ENDED -> "ENDED"
+                else -> snap.playbackState.toString()
+            }
+        val resolution =
+            if ((snap.videoWidth ?: 0) > 0 && (snap.videoHeight ?: 0) > 0) {
+                "${snap.videoWidth}x${snap.videoHeight}"
+            } else {
+                "-"
+            }
+        val decoder =
+            when (snap.videoDecoder) {
+                tv.danmaku.ijk.media.player.IjkMediaPlayer.FFP_PROPV_DECODER_MEDIACODEC -> "MediaCodec"
+                tv.danmaku.ijk.media.player.IjkMediaPlayer.FFP_PROPV_DECODER_AVCODEC -> "avcodec"
+                else -> "-"
+            }
+        return buildString {
+            appendLiveDebugHeader(this, state = state, isPlaying = snap.isPlaying, playWhenReady = snap.playWhenReady)
+            append("pos=").append(snap.positionMs).append("ms")
+            append(" buf=").append(snap.bufferedPositionMs).append("ms")
+            append(" spd=").append(String.format(Locale.US, "%.2f", snap.playbackSpeed))
+            append('\n')
+
+            append("res=").append(resolution)
+            append(" fps=").append(formatDebugFps(snap.fpsOutput ?: snap.fpsDecode) ?: "-")
+            append(" br=").append(formatBitrateKbps(snap.bitRate.takeIf { it > 0L }))
+            appendCdnHostLine(this)
+
+            buildDebugDisplayText()?.let { disp ->
+                append("disp=").append(disp)
+                append('\n')
+            }
+
+            append("decoder=").append(decoder)
+            if (snap.tcpSpeed > 0L) {
+                append(" net=").append(String.format(Locale.US, "%.2f", snap.tcpSpeed * 8.0 / 1_000_000.0)).append("Mbps")
+            }
+            append(" vCache=").append(snap.videoCachedDurationMs.coerceAtLeast(0L)).append("ms")
+            append(" aCache=").append(snap.audioCachedDurationMs.coerceAtLeast(0L)).append("ms")
+            append('\n')
+
+            appendDanmakuDebug(this)
+        }
+    }
+
+    private fun appendLiveDebugHeader(sb: StringBuilder, state: String, isPlaying: Boolean, playWhenReady: Boolean) {
+        val play = lastPlay
+        sb.append("room=").append(realRoomId)
+        sb.append(" qn=").append(play?.currentQn ?: 0)
+        sb.append(" line=").append(session.lineOrder)
+        sb.append(" state=").append(state)
+        sb.append(" playing=").append(isPlaying)
+        sb.append(" pwr=").append(playWhenReady)
+        sb.append('\n')
+    }
+
+    private fun appendCdnHostLine(sb: StringBuilder) {
+        val cdnHost = debug.videoTransferHost?.trim().takeIf { !it.isNullOrBlank() } ?: debug.cdnHost?.trim().takeIf { !it.isNullOrBlank() } ?: "-"
+        if (cdnHost.length <= 42) {
+            sb.append(" cdn=").append(cdnHost)
+            sb.append('\n')
+        } else {
+            sb.append('\n')
+            sb.append("cdn=").append(cdnHost)
+            sb.append('\n')
+        }
+    }
+
+    private fun appendLiveHlsDebug(sb: StringBuilder) {
+        val info = liveHlsDebugInfo ?: return
+        sb.append("hls=")
+        var hasField = false
+        info.lastSegmentSequence?.let {
+            sb.append("seq=").append(it)
+            hasField = true
+        } ?: info.mediaSequence?.let {
+            sb.append("seq=").append(it)
+            hasField = true
+        }
+        info.targetDurationSec?.let {
+            if (hasField) sb.append(' ')
+            sb.append("td=").append(formatDebugSeconds(it)).append('s')
+            hasField = true
+        }
+        info.lastSegmentUri?.substringAfterLast('/')?.takeIf { it.isNotBlank() }?.let {
+            if (hasField) sb.append(' ')
+            sb.append("seg=").append(shortenDebugValue(it, maxChars = 24))
+            hasField = true
+        }
+        if (info.segmentCount > 0) {
+            if (hasField) sb.append(' ')
+            sb.append("win=").append(info.segmentCount)
+            hasField = true
+        }
+        if (!hasField) sb.append('-')
+        sb.append('\n')
+
+        if (!info.lastAuxRaw.isNullOrBlank()) {
+            sb.append("aux=").append(shortenDebugValue(info.lastAuxRaw, maxChars = 48)).append('\n')
+        }
+        if (!info.mapUri.isNullOrBlank()) {
+            sb.append("map=").append(shortenDebugValue(info.mapUri.substringAfterLast('/'), maxChars = 32)).append('\n')
+        }
+    }
+
+    private fun appendDanmakuDebug(sb: StringBuilder) {
+        runCatching { binding.danmakuView.getDebugStats() }.getOrNull()?.let { dm ->
+            sb.append("dm=").append(if (dm.configEnabled) "on" else "off")
+            sb.append(" fps=").append(String.format(Locale.US, "%.1f", dm.drawFps))
+            sb.append(" act=").append(dm.lastFrameActive)
+            sb.append(" pend=").append(dm.lastFramePending)
+            sb.append(" hit=").append(dm.lastFrameCachedDrawn).append('/').append(dm.lastFrameActive)
+            sb.append(" fb=").append(dm.lastFrameFallbackDrawn)
+            sb.append(" q=").append(dm.queueDepth)
+            if (dm.invalidateFull) {
+                sb.append(" inv=full")
+            } else {
+                sb.append(" inv=").append(dm.invalidateTopPx).append('-').append(dm.invalidateBottomPx)
+            }
+        }
+    }
+
+    private fun updateDebugVideoStatsFromCounters(exo: ExoPlayer) {
+        val nowMs = SystemClock.elapsedRealtime()
+        val counters = exo.videoDecoderCounters ?: return
+        counters.ensureUpdated()
+        debug.droppedFramesTotal = maxOf(debug.droppedFramesTotal, counters.droppedBufferCount.toLong())
+
+        val count = counters.renderedOutputBufferCount
+        val lastCount = debug.renderedFramesLastCount
+        val lastAt = debug.renderedFramesLastAtMs
+        debug.renderedFramesLastCount = count
+        debug.renderedFramesLastAtMs = nowMs
+
+        if (lastCount == null || lastAt == null) return
+        val deltaMs = nowMs - lastAt
+        val deltaFrames = count - lastCount
+        if (deltaMs <= 0L || deltaMs > 10_000L) return
+        if (deltaFrames <= 0) return
+        val instantFps = (deltaFrames * 1000f) / deltaMs.toFloat()
+        debug.renderFps = debug.renderFps?.let { it * 0.7f + instantFps * 0.3f } ?: instantFps
+    }
+
+    private fun buildDebugResolutionText(exo: ExoPlayer, trackFormat: Format?): String {
+        val videoSize = exo.videoSize
+        val width = videoSize.width.takeIf { it > 0 } ?: debug.videoInputWidth ?: 0
+        val height = videoSize.height.takeIf { it > 0 } ?: debug.videoInputHeight ?: 0
+        if (width > 0 && height > 0) return "${width}x${height}"
+        val trackWidth = trackFormat?.width?.takeIf { it > 0 } ?: 0
+        val trackHeight = trackFormat?.height?.takeIf { it > 0 } ?: 0
+        return if (trackWidth > 0 && trackHeight > 0) "${trackWidth}x${trackHeight}" else "-"
+    }
+
+    private fun pickSelectedVideoFormat(exo: ExoPlayer): Format? {
+        val tracks = exo.currentTracks
+        for (group in tracks.groups) {
+            if (!group.isSelected) continue
+            for (i in 0 until group.length) {
+                if (!group.isTrackSelected(i)) continue
+                val format = group.getTrackFormat(i)
+                val mime = format.sampleMimeType ?: ""
+                if (mime.startsWith("video/")) return format
+            }
+        }
+        return null
+    }
+
+    private fun formatDebugFps(fps: Float?): String? {
+        val value = fps?.takeIf { it > 0f } ?: return null
+        val rounded = value.roundToInt().toFloat()
+        return if (abs(value - rounded) < 0.05f) rounded.toInt().toString() else String.format(Locale.US, "%.1f", value)
+    }
+
+    private fun formatDebugSeconds(seconds: Double): String {
+        val rounded = seconds.roundToInt().toDouble()
+        return if (abs(seconds - rounded) < 0.01) rounded.toInt().toString() else String.format(Locale.US, "%.2f", seconds)
+    }
+
+    private fun formatBitrateKbps(bps: Long?): String {
+        val value = bps?.takeIf { it > 0L } ?: return "-"
+        return String.format(Locale.US, "%.1fkbps", value / 1000.0)
+    }
+
+    private fun shortenDebugValue(value: String, maxChars: Int): String {
+        val text = value.trim()
+        if (text.length <= maxChars) return text
+        return text.take(maxChars - 1) + "…"
     }
 
     private fun buildDebugDisplayText(): String? {
@@ -1407,7 +1706,7 @@ class LivePlayerActivity : BaseActivity() {
                 speedLevel = BiliClient.prefs.danmakuSpeed,
                 area = BiliClient.prefs.danmakuArea,
             ),
-        val debugEnabled: Boolean = false,
+        val debugEnabled: Boolean = BiliClient.prefs.playerDebugEnabled,
     )
 
     companion object {
